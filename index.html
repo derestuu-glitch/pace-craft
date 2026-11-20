@@ -517,6 +517,18 @@ service cloud.firestore {
             </select>
           </div>
 
+          <!-- Spesialisasi Latihan -->
+          <div class="space-y-1">
+            <label for="planFocus" class="block text-xs font-semibold text-slate-700">Spesialisasi Latihan</label>
+            <select id="planFocus" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold bg-white focus:outline-none focus:ring-2 focus:ring-orange-500">
+              <option value="balanced" selected>Seimbang (VO2 + Threshold + Endurance)</option>
+              <option value="speed_vo2">Kecepatan &amp; VO2 Max (Interval Lintasan)</option>
+              <option value="threshold_stamina">Daya Tahan &amp; Threshold (Tempo / Cruise)</option>
+              <option value="race_pace">Spesifik Race Pace (Simulasi Lomba)</option>
+              <option value="hills_power">Kekuatan Tanjakan &amp; Power (Hills)</option>
+            </select>
+          </div>
+
           <!-- Komposisi Hari Lari: Latihan Inti vs Easy/Recovery -->
           <div class="rounded-xl bg-orange-50/60 border border-orange-200 p-3 space-y-2.5">
             <div class="flex items-center justify-between gap-2">
@@ -2158,6 +2170,7 @@ service cloud.firestore {
         weeklyTarget: 45,
         weeklyUnit: 'km',
         level: 'intermediate',
+        focus: 'balanced',
         coreDays: 2,
         easyDays: 2,
         includeStrength: true,
@@ -2330,6 +2343,7 @@ service cloud.firestore {
           weeklyTarget: state.plan.weeklyTarget,
           weeklyUnit: state.plan.weeklyUnit,
           level: state.plan.level,
+          focus: state.plan.focus,
           coreDays: state.plan.coreDays,
           easyDays: state.plan.easyDays,
           includeStrength: state.plan.includeStrength,
@@ -2383,6 +2397,7 @@ service cloud.firestore {
       document.getElementById('planWeeklyTarget').value = p.weeklyTarget;
       document.getElementById('planWeeklyUnit').value = p.weeklyUnit;
       document.getElementById('planLevel').value = p.level;
+      document.getElementById('planFocus').value = p.focus || 'balanced';
       document.getElementById('planCoreDays').value = String(p.coreDays);
       document.getElementById('planEasyDays').value = String(p.easyDays);
       document.getElementById('planIncludeStrength').checked = !!p.includeStrength;
@@ -2883,6 +2898,17 @@ service cloud.firestore {
     // =========================================================================
     // TAB 1: PROGRAM LATIHAN LOMBA PROGRESIF
     // =========================================================================
+    function getPlanFocusLabel(focus) {
+      const map = {
+        balanced: 'Seimbang (VO2 + Threshold)',
+        speed_vo2: 'Kecepatan & VO2 Max',
+        threshold_stamina: 'Daya Tahan & Threshold',
+        race_pace: 'Spesifik Race Pace',
+        hills_power: 'Kekuatan Tanjakan & Power'
+      };
+      return map[focus] || map.balanced;
+    }
+
     function updatePlanQuickBadges() {
       const dist = parseFloat(document.getElementById('planDist').value) || 10;
       const h = parseInt(document.getElementById('planH').value, 10) || 0;
@@ -2936,6 +2962,7 @@ service cloud.firestore {
       p.weeklyTarget = Math.max(10, parseFloat(document.getElementById('planWeeklyTarget').value) || 45);
       p.weeklyUnit = document.getElementById('planWeeklyUnit').value || 'km';
       p.level = document.getElementById('planLevel').value || 'intermediate';
+      p.focus = document.getElementById('planFocus').value || 'balanced';
       p.coreDays = parseInt(document.getElementById('planCoreDays').value, 10);
       p.easyDays = parseInt(document.getElementById('planEasyDays').value, 10);
       if (p.coreDays + p.easyDays > 6) {
@@ -3026,9 +3053,11 @@ service cloud.firestore {
         </div>
       `).join('');
 
-      // Bangun Jadwal Mingguan
+      // Bangun Jadwal Mingguan (mendukung Spesialisasi Latihan)
       const weeksData = [];
       const slots = buildDaySlots(p.coreDays, p.easyDays, p.includeStrength);
+      const focus = p.focus || 'balanced';
+
       for (let w = 1; w <= p.weeks; w++) {
         const isLast = w === p.weeks;
         const isDeload = !isLast && w > 2 && w % 4 === 0;
@@ -3049,28 +3078,129 @@ service cloud.firestore {
 
         const sessions = slots.map((slot, sIdx) => {
           const sid = `p_w${w}_d${sIdx}_${slot.role}`;
+
           if (slot.role === 'long') {
             const isRaceDay = isLast;
             const dKm = isRaceDay ? Number(p.dist.toFixed(1)) : lrKm;
+            let lrType = w % 2 === 0 ? 'Fast-Finish Long Run' : 'Aerobic Endurance Long Run';
+            let lrMain = w % 2 === 0
+              ? `${(dKm * 0.75).toFixed(1)} km Z2 + ${(dKm * 0.25).toFixed(1)} km terakhir di ${formatPace(weekRefPace + 15)}.`
+              : `${dKm} km konstan di zona aerobik nyaman (Z2).`;
+            let lrCue = 'Jaga irama napas teratur dan isi hidrasi setiap 25–30 menit.';
+
+            if (!isRaceDay) {
+              if (focus === 'speed_vo2') {
+                lrType = 'Aerobic Long Run + Fast Strides';
+                lrMain = `${dKm} km stabil di Zona 2, lalu tutup dengan 6 × 100m strides cepat & rileks.`;
+                lrCue = 'Strides di akhir long run melatih efisiensi neuromuscular saat kaki mulai lelah.';
+              } else if (focus === 'threshold_stamina') {
+                lrType = 'Negative Split Endurance Long Run';
+                lrMain = `${(dKm * 0.55).toFixed(1)} km Z2 + ${(dKm * 0.45).toFixed(1)} km akhir bertahap menuju ${formatPace(weekRefPace + 18)}.`;
+                lrCue = 'Tingkatkan kecepatan perlahan di paruh kedua tanpa membiarkan detak jantung melonjak mendadak.';
+              } else if (focus === 'race_pace') {
+                lrType = 'Race-Pace Finish Long Run';
+                lrMain = `${(dKm * 0.7).toFixed(1)} km santai Z2 + ${(dKm * 0.3).toFixed(1)} km terakhir di Target Race Pace (${formatPace(weekRefPace)}).`;
+                lrCue = 'Simulasikan rasa lelah kilometer akhir lomba dan jaga form lari tetap rapi.';
+              } else if (focus === 'hills_power') {
+                lrType = 'Hilly Rolling Long Run';
+                lrMain = `${dKm} km di rute bergelombang (rolling hills) — jaga usaha konstan saat menanjak dan rileks saat turun.`;
+                lrCue = 'Perpendek langkah dan tingkatkan cadence saat menanjak agar otot paha tetap hemat energi.';
+              }
+            }
+
             return {
               id: sid, day: slot.day, category: 'long',
               tagCls: 'bg-rose-100 text-rose-800',
-              type: isRaceDay ? `RACE DAY — Target ${p.dist}K` : (w % 2 === 0 ? 'Fast-Finish Long Run' : 'Aerobic Endurance Long Run'),
+              type: isRaceDay ? `RACE DAY — Target ${p.dist}K` : lrType,
               dist: dKm,
               pace: isRaceDay ? formatPace(targetPace) : formatPace(weekRefPace + 52 + lvlAdj),
               hr: isRaceDay ? hrZ[3].range : hrZ[1].range,
               rpe: isRaceDay ? '9/10' : '6/10',
               durationMin: Math.round((dKm * (weekRefPace + 45)) / 60),
               warmup: isRaceDay ? '10 mnt jog ringan + 4×80m strides.' : '10 mnt easy pace bertahap.',
-              mainSet: isRaceDay ? `Eksekusi lomba ${p.dist} km dengan strategi Negative Split menuju ${formatPace(targetPace)}.` : (w % 2 === 0 ? `${(dKm * 0.75).toFixed(1)} km Z2 + ${(dKm * 0.25).toFixed(1)} km terakhir di ${formatPace(weekRefPace + 15)}.` : `${dKm} km konstan di zona aerobik nyaman (Z2).`),
+              mainSet: isRaceDay ? `Eksekusi lomba ${p.dist} km dengan strategi Negative Split menuju ${formatPace(targetPace)}.` : lrMain,
               cooldown: '10 mnt jalan santai + peregangan paha & betis.',
-              cue: isRaceDay ? 'Jangan terlalu cepat di 2 km pertama, simpan tenaga untuk 20% akhir.' : 'Jaga irama napas teratur dan isi hidrasi setiap 25–30 menit.'
+              cue: isRaceDay ? 'Jangan terlalu cepat di 2 km pertama, simpan tenaga untuk 20% akhir.' : lrCue
             };
           }
+
           if (slot.role.startsWith('core_')) {
             const idx = Number(slot.role.split('_')[1]);
             const dKm = Math.max(4, Number((baseSessionKm * 1.1).toFixed(1)));
+
             if (idx === 0) {
+              if (focus === 'speed_vo2') {
+                const isBillat = w % 2 === 0;
+                return {
+                  id: sid, day: slot.day, category: 'quality',
+                  tagCls: 'bg-orange-100 text-orange-800',
+                  type: isBillat ? 'Billat 30-30s vVO2max Intervals' : 'Track VO2 Max 1000m Repeats',
+                  dist: dKm,
+                  pace: formatPace(zVo2),
+                  hr: hrZ[4].range,
+                  rpe: '9/10',
+                  durationMin: Math.round((dKm * (weekRefPace + 18)) / 60) + 10,
+                  warmup: '1.5 km easy + ABC drills + 4×60m strides.',
+                  mainSet: isBillat
+                    ? `14–16 × (30 dtk cepat @ ${formatPace(zVo2)} / 30 dtk jog float aktif).`
+                    : `5 × 1000m @ ${formatPace(zVo2)}, jeda jog 200m (2 menit).`,
+                  cooldown: '1.5 km jog sangat santai + peregangan.',
+                  cue: 'Fokus pada dorongan kaki cepat & napas dalam untuk memaksimalkan waktu di zona vVO2max.'
+                };
+              }
+              if (focus === 'threshold_stamina') {
+                return {
+                  id: sid, day: slot.day, category: 'quality',
+                  tagCls: 'bg-orange-100 text-orange-800',
+                  type: w % 2 === 1 ? 'Lactate Threshold Cruise (3×10 Mnt)' : 'Threshold Double Blocks (2×15 Mnt)',
+                  dist: dKm,
+                  pace: formatPace(zThresh),
+                  hr: hrZ[3].range,
+                  rpe: '7.5/10',
+                  durationMin: Math.round((dKm * (weekRefPace + 10)) / 60) + 10,
+                  warmup: '1.5 km easy + leg swings + 3×60m strides.',
+                  mainSet: w % 2 === 1
+                    ? `3 × 10 menit @ ${formatPace(zThresh)}, jeda jog santai 2 menit antar set.`
+                    : `2 × 15 menit @ ${formatPace(zThresh + 3)}, jeda jog santai 3 menit.`,
+                  cooldown: '1.5 km jog santai + mobility pinggul.',
+                  cue: 'Jaga usaha tetap stabil dan terkendali — jangan tergesa-gesa melewati ambang laktat.'
+                };
+              }
+              if (focus === 'race_pace') {
+                return {
+                  id: sid, day: slot.day, category: 'quality',
+                  tagCls: 'bg-orange-100 text-orange-800',
+                  type: w % 2 === 1 ? 'Race-Pace Cruise Intervals' : 'Target Race-Pace Progression',
+                  dist: dKm,
+                  pace: formatPace(weekRefPace),
+                  hr: hrZ[3].range,
+                  rpe: '8/10',
+                  durationMin: Math.round((dKm * (weekRefPace + 12)) / 60) + 10,
+                  warmup: '1.5 km easy + 4×80m strides.',
+                  mainSet: w % 2 === 1
+                    ? `4 × 1.5 km @ Target Race Pace (${formatPace(weekRefPace)}), jeda jog 90 detik.`
+                    : `2 km Steady (${formatPace(zSteady)}) → 4 km penuh @ ${formatPace(weekRefPace)}.`,
+                  cooldown: '1.5 km jog santai.',
+                  cue: 'Kunci ritme langkah dan pernapasan agar pace lomba terasa otomatis dan efisien.'
+                };
+              }
+              if (focus === 'hills_power') {
+                return {
+                  id: sid, day: slot.day, category: 'quality',
+                  tagCls: 'bg-orange-100 text-orange-800',
+                  type: 'Sustained Power Hill Repeats',
+                  dist: dKm,
+                  pace: formatPace(zVo2 + 6),
+                  hr: hrZ[4].range,
+                  rpe: '8.5/10',
+                  durationMin: Math.round((dKm * (weekRefPace + 20)) / 60) + 10,
+                  warmup: '1.5 km easy di jalan datar + dynamic drills.',
+                  mainSet: `7 × 90 detik lari tanjakan kuat (kemiringan 4–6%, usaha setara ${formatPace(zVo2)}), jalan/jog pelan turun.`,
+                  cooldown: '1.5 km jog santai di jalur datar.',
+                  cue: 'Condongkan tubuh ringan dari pergelangan kaki dan ayunkan siku aktif ke belakang.'
+                };
+              }
+
               const useNorwegian = vo2Active || w % 2 === 1;
               return {
                 id: sid, day: slot.day, category: 'quality',
@@ -3087,7 +3217,77 @@ service cloud.firestore {
                 cue: 'Pertahankan postur tegak & cadence 175–185 spm saat kelelahan muncul di set akhir.'
               };
             }
+
             if (idx === 1) {
+              if (focus === 'speed_vo2') {
+                return {
+                  id: sid, day: slot.day, category: 'quality',
+                  tagCls: 'bg-amber-100 text-amber-800',
+                  type: w % 2 === 0 ? 'Track 400m Speed Repeats' : 'Mona Fartlek (Speed Change)',
+                  dist: dKm,
+                  pace: formatPace(zRep),
+                  hr: hrZ[4].range,
+                  rpe: '8.5/10',
+                  durationMin: Math.round((dKm * (weekRefPace + 15)) / 60) + 8,
+                  warmup: '1.5 km easy + 4×60m strides.',
+                  mainSet: w % 2 === 0
+                    ? `10 × 400m @ ${formatPace(zRep)} (split 400m: ${formatMS(zRep * 0.4)}), jeda 75–90 dtk.`
+                    : `2×90 dtk, 4×60 dtk, 4×30 dtk, 4×15 dtk cepat @ ${formatPace(zVo2)} dengan float sama durasi.`,
+                  cooldown: '1.5 km jog santai.',
+                  cue: 'Jaga bahu tetap rileks saat berlari cepat agar ekonomi gerak makin tajam.'
+                };
+              }
+              if (focus === 'threshold_stamina') {
+                return {
+                  id: sid, day: slot.day, category: 'quality',
+                  tagCls: 'bg-amber-100 text-amber-800',
+                  type: w % 2 === 0 ? 'Alternating Tempo / Float' : 'Continuous Tempo Run',
+                  dist: dKm,
+                  pace: formatPace(zThresh),
+                  hr: hrZ[3].range,
+                  rpe: '7.5/10',
+                  durationMin: Math.round((dKm * (weekRefPace + 12)) / 60) + 8,
+                  warmup: '1.5 km Z1–Z2 + leg swings.',
+                  mainSet: w % 2 === 0
+                    ? `3 set: 1 km @ ${formatPace(zThresh)} langsung disambung 1 km float @ ${formatPace(zSteady + 15)} tanpa berhenti.`
+                    : `25–30 menit tempo kontinu @ ${formatPace(zThresh + 4)}.`,
+                  cooldown: '1 km jog santai + peregangan.',
+                  cue: 'Latih tubuh membersihkan asam laktat sambil tetap mempertahankan pace steady.'
+                };
+              }
+              if (focus === 'race_pace') {
+                return {
+                  id: sid, day: slot.day, category: 'quality',
+                  tagCls: 'bg-amber-100 text-amber-800',
+                  type: 'Broken Race-Pace Simulation',
+                  dist: dKm,
+                  pace: formatPace(weekRefPace),
+                  hr: hrZ[3].range,
+                  rpe: '8/10',
+                  durationMin: Math.round((dKm * (weekRefPace + 12)) / 60) + 8,
+                  warmup: '1.5 km easy + 3×80m strides.',
+                  mainSet: `2 × 12 menit @ Target Race Pace (${formatPace(weekRefPace)}), jeda jog aktif 3 menit.`,
+                  cooldown: '1 km jog santai.',
+                  cue: 'Latih strategi nutrisi/minum di sela set jika target lomba Anda di atas 10K.'
+                };
+              }
+              if (focus === 'hills_power') {
+                return {
+                  id: sid, day: slot.day, category: 'quality',
+                  tagCls: 'bg-amber-100 text-amber-800',
+                  type: 'Short Steep Hill Sprints + Flat Tempo',
+                  dist: dKm,
+                  pace: formatPace(zThresh),
+                  hr: hrZ[3].range,
+                  rpe: '8/10',
+                  durationMin: Math.round((dKm * (weekRefPace + 15)) / 60) + 8,
+                  warmup: '1.5 km easy.',
+                  mainSet: `8 × 25 detik sprint tanjakan eksplosif (jalan turun penuh), lalu 12 menit tempo datar @ ${formatPace(zThresh)}.`,
+                  cooldown: '1 km jog santai + stretching betis.',
+                  cue: 'Bangun tenaga dorong (power) di tanjakan lalu konversi ke kecepatan efisien di jalan datar.'
+                };
+              }
+
               return {
                 id: sid, day: slot.day, category: 'quality',
                 tagCls: 'bg-amber-100 text-amber-800',
@@ -3103,6 +3303,72 @@ service cloud.firestore {
                 cue: 'Usaha terasa "nyaman namun menantang" — cukup untuk berbicara 3–4 kata saja.'
               };
             }
+
+            if (focus === 'speed_vo2') {
+              return {
+                id: sid, day: slot.day, category: 'quality',
+                tagCls: 'bg-purple-100 text-purple-800',
+                type: 'Fast 200m Repetition & Economy',
+                dist: dKm,
+                pace: formatPace(zRep),
+                hr: hrZ[4].range,
+                rpe: '8/10',
+                durationMin: Math.round((dKm * (weekRefPace + 15)) / 60) + 8,
+                warmup: '1.5 km easy + dynamic drills.',
+                mainSet: `10 × 200m cepat & rapi @ ${formatPace(zRep)}, jeda jalan/jog 200m.`,
+                cooldown: '1.5 km jog santai.',
+                cue: 'Prioritaskan langkah ringan dan kontak tanah singkat.'
+              };
+            }
+            if (focus === 'threshold_stamina') {
+              return {
+                id: sid, day: slot.day, category: 'quality',
+                tagCls: 'bg-purple-100 text-purple-800',
+                type: 'Kenyan Progression Run',
+                dist: dKm,
+                pace: formatPace(zSteady),
+                hr: hrZ[2].range,
+                rpe: '7.5/10',
+                durationMin: Math.round((dKm * (weekRefPace + 20)) / 60) + 5,
+                warmup: 'Mulai langsung dengan 1.5 km sangat santai.',
+                mainSet: `Tingkatkan pace setiap 1–2 km secara mulus dari ${formatPace(zEasy)} hingga menutup 1 km terakhir di ${formatPace(zThresh)}.`,
+                cooldown: '1 km jog santai.',
+                cue: 'Kontrol kesabaran di awal agar sanggup menutup kuat di akhir.'
+              };
+            }
+            if (focus === 'race_pace') {
+              return {
+                id: sid, day: slot.day, category: 'quality',
+                tagCls: 'bg-purple-100 text-purple-800',
+                type: 'Race Surge & Final Kick',
+                dist: dKm,
+                pace: formatPace(weekRefPace - 6),
+                hr: hrZ[3].range,
+                rpe: '8/10',
+                durationMin: Math.round((dKm * (weekRefPace + 15)) / 60) + 8,
+                warmup: '1.5 km easy + 3×60m strides.',
+                mainSet: `20 menit @ ${formatPace(weekRefPace + 8)} dengan 4×45 dtk surge @ ${formatPace(zVo2)}, lalu tutup 400m finish kick.`,
+                cooldown: '1 km jog santai.',
+                cue: 'Latih mental mengubah kecepatan saat menyalip atau mendekati garis finish.'
+              };
+            }
+            if (focus === 'hills_power') {
+              return {
+                id: sid, day: slot.day, category: 'quality',
+                tagCls: 'bg-purple-100 text-purple-800',
+                type: 'Rolling Hills Fartlek',
+                dist: dKm,
+                pace: formatPace(zSteady),
+                hr: hrZ[3].range,
+                rpe: '7.5/10',
+                durationMin: Math.round((dKm * (weekRefPace + 18)) / 60) + 8,
+                warmup: '1.5 km easy.',
+                mainSet: `6 × (2 menit dorong kuat di tanjakan/rolling + 2 menit jog pemulihan aktif).`,
+                cooldown: '1 km easy.',
+                cue: 'Manfaatkan turunan untuk menjaga momentum tanpa menghentak lutut.'
+              };
+            }
+
             return {
               id: sid, day: slot.day, category: 'quality',
               tagCls: 'bg-purple-100 text-purple-800',
@@ -3118,6 +3384,7 @@ service cloud.firestore {
               cue: 'Fokus efisiensi dorongan kaki & ayunan lengan rileks.'
             };
           }
+
           if (slot.role.startsWith('easy_')) {
             const idx = Number(slot.role.split('_')[1]);
             const dKm = Math.max(3, Number((baseSessionKm * 0.9).toFixed(1)));
@@ -3137,6 +3404,7 @@ service cloud.firestore {
               cue: 'Harus bisa mengobrol penuh tanpa terengah-engah.'
             };
           }
+
           return {
             id: sid, day: slot.day, category: 'strength',
             tagCls: 'bg-slate-200 text-slate-800',
@@ -3233,9 +3501,9 @@ service cloud.firestore {
       const longRunKm = parseFloat(document.getElementById('cooperLongRunKm').value) || 0;
 
       document.getElementById('cooperTargetPaceBadge').textContent =
-        targetMeters >= 500 ? formatPace(720 / (targetMeters / 1000)) : '--:-- /km';
+        targetMeters > 0 ? formatPace(720 / (targetMeters / 1000)) : '--:-- /km';
       document.getElementById('cooperCurrentPaceBadge').textContent =
-        currentMeters >= 500 ? formatPace(720 / (currentMeters / 1000)) : '--:-- /km';
+        currentMeters > 0 ? formatPace(720 / (currentMeters / 1000)) : '--:-- /km';
 
       document.getElementById('cooperMileageHint').textContent = weeklyUnit === 'km'
         ? `≈ ${(weeklyTarget / 1.60934).toFixed(1)} mil`
@@ -3352,9 +3620,12 @@ service cloud.firestore {
         </div>
       `).join('');
 
-      // Bangun Jadwal Mingguan Cooper
+      // Bangun Jadwal Mingguan Cooper 12 Menit
       const weeksData = [];
       const slots = buildDaySlots(c.coreDays, c.easyDays, c.includeStrength);
+      const reps400 = Math.max(4, 8 + lvl.repsAdj);
+      const reps800 = Math.max(3, 5 + lvl.repsAdj);
+
       for (let w = 1; w <= c.weeks; w++) {
         const isLast = w === c.weeks;
         const isDeload = !isLast && w > 2 && w % 4 === 0;
@@ -3375,45 +3646,49 @@ service cloud.firestore {
 
         const sessions = slots.map((slot, sIdx) => {
           const sid = `c_w${w}_d${sIdx}_${slot.role}`;
+
           if (slot.role === 'long') {
             return {
               id: sid, day: slot.day, category: 'long',
               tagCls: 'bg-rose-100 text-rose-800',
-              type: isLast ? `HARI UJI TES 12 MENIT (Target ${c.targetMeters}m)` : 'Aerobic Long Run (Fondasi Cooper)',
+              type: isLast ? `HARI UJI COOPER 12 MENIT (Target ${c.targetMeters}m)` : (w % 2 === 0 ? 'Progressive Aerobic Long Run' : 'Endurance Base Long Run'),
               dist: lrKm,
               pace: isLast ? formatPace(tgtPace) : formatPace(weekPace + 68 + lvl.easyAdj),
               hr: isLast ? hrZ[4].range : hrZ[1].range,
-              rpe: isLast ? '9.5/10' : '6/10',
-              durationMin: isLast ? 30 : Math.round((lrKm * (weekPace + 65)) / 60),
-              warmup: isLast ? '10 mnt jog ringan + 4×80m strides akselerasi.' : '10 mnt mulai santai.',
-              mainSet: isLast ? `Lari maksimal 12 menit penuh! Jaga split 400m di ${formatMS(tgtPace * 0.4)} agar menyentuh ${c.targetMeters}m.` : `${lrKm} km stabil di Zona 2 untuk memperkuat daya tahan oksigen dasar.`,
-              cooldown: '10 mnt jalan kaki + stretching menyeluruh.',
-              cue: isLast ? 'Lap 1 jangan terlalu sprint; kunci ritme konstan di menit 4–9, lalu kick habis di 2 menit terakhir.' : 'Fokus durasi & napas hidung/mulut yang tenang.'
+              rpe: isLast ? '10/10' : '6/10',
+              durationMin: isLast ? 35 : Math.round((lrKm * (weekPace + 65)) / 60),
+              warmup: isLast ? '12 mnt jog sangat santai + dynamic drills + 4×60m strides.' : '10 mnt pace santai Z1–Z2.',
+              mainSet: isLast
+                ? `Lari 12 menit penuh di lintasan! Jaga split tiap 400m di ${formatMS(tgtPace * 0.4)} (200m: ${formatMS(tgtPace * 0.2)}) menuju ${c.targetMeters}m.`
+                : (w % 2 === 0 ? `${(lrKm * 0.75).toFixed(1)} km Z2 + ${(lrKm * 0.25).toFixed(1)} km terakhir di ${formatPace(weekPace + 32)}.` : `${lrKm} km penuh di Zona 2 untuk fondasi aerobik Cooper.`),
+              cooldown: '10 mnt jalan kaki + peregangan paha & betis.',
+              cue: isLast ? 'Jangan terlalu kencang di 2 menit pertama; dorong maksimal di 3 menit terakhir!' : 'Fokus ritme napas stabil agar ketahanan 12 menit makin kuat.'
             };
           }
+
           if (slot.role.startsWith('core_')) {
             const idx = Number(slot.role.split('_')[1]);
             const dKm = Math.max(4, Number((baseKm * 1.05).toFixed(1)));
             if (idx === 0) {
-              const reps = Math.max(5, 8 + lvl.repsAdj);
-              const isHill = c.focus === 'hills_power' && w % 2 === 0;
+              const isHill = c.focus === 'hills_power';
+              const is400 = c.focus === 'track_speed' || w % 2 === 1;
               return {
                 id: sid, day: slot.day, category: 'track',
                 tagCls: 'bg-orange-100 text-orange-800',
-                type: isHill ? 'Power Hill Repeats' : (w % 2 === 1 ? 'Track 400m Cooper Repeats' : 'Track 800m VO2 Max Intervals'),
+                type: isHill ? 'Power Hill Repeats (Cooper VO2)' : is400 ? `Track 400m Repeats (${reps400}×400m)` : `Track 800m VO2 Max (${reps800}×800m)`,
                 dist: dKm,
-                pace: formatPace(weekPace - 5),
+                pace: formatPace(weekPace - 6),
                 hr: hrZ[4].range,
-                rpe: '8.5/10',
-                durationMin: 45,
-                warmup: '1.5 km jog santai + ABC running drills + 3×60m strides.',
+                rpe: '9/10',
+                durationMin: Math.round((dKm * (weekPace + 25)) / 60) + 12,
+                warmup: '1.5 km easy + ABC running drills + 4×60m strides.',
                 mainSet: isHill
-                  ? `${reps} × 45 dtk tanjakan tajam (RPE 8.5), jalan turun pemulihan.`
-                  : (w % 2 === 1
-                    ? `${reps} × 400m @ ${weekLap400}/lap (split 200m: ${weekLap200}), jeda ${lvl.restTxt}.`
-                    : `${Math.max(3, 5 + lvl.repsAdj)} × 800m @ ${formatPace(weekPace)}, jeda jog 200m (${lvl.restTxt}).`),
-                cooldown: '1.5 km jog sangat santai + mobility.',
-                cue: 'Jaga konsistensi split dari repetisi pertama hingga terakhir.'
+                  ? `8 × 60 detik lari tanjakan kuat (RPE 9), jalan turun pemulihan penuh.`
+                  : is400
+                    ? `${reps400} × 400m @ split ${weekLap400} (200m: ${weekLap200}), jeda jog/jalan ${lvl.restTxt}.`
+                    : `${reps800} × 800m @ ${formatPace(weekPace - 4)} (per 400m: ${weekLap400}), jeda ${lvl.restTxt}.`,
+                cooldown: '1.5 km jog sangat santai + peregangan.',
+                cue: 'Kunci kecepatan lintasan yang konsisten sejak repetisi pertama hingga terakhir.'
               };
             }
             if (idx === 1) {
@@ -3421,52 +3696,60 @@ service cloud.firestore {
               return {
                 id: sid, day: slot.day, category: 'tempo',
                 tagCls: 'bg-amber-100 text-amber-800',
-                type: isSim ? 'Cooper Pace Simulation (3×4 Menit)' : 'Lactate Threshold Tempo',
+                type: isSim ? (w >= Math.ceil(c.weeks * 0.6) ? 'Broken 12-Minute (2×6 Menit)' : 'Cooper Pace Simulation (3×4 Menit)') : 'Lactate Threshold Cruise',
                 dist: dKm,
                 pace: formatPace(isSim ? weekPace : weekPace + 18),
                 hr: hrZ[3].range,
-                rpe: '8/10',
-                durationMin: 42,
-                warmup: '1.5 km easy + 3×80m strides.',
+                rpe: isSim ? '8.5/10' : '7.5/10',
+                durationMin: Math.round((dKm * (weekPace + 20)) / 60) + 10,
+                warmup: '1.5 km Z1–Z2 + 3×60m strides.',
                 mainSet: isSim
-                  ? `3 × 4 menit @ ${formatPace(weekPace)} (target ${(weekMeters / 3).toFixed(0)}m per set), jeda 2.5 menit.`
-                  : `20 menit Tempo stabil @ ${formatPace(weekPace + 18)}.`,
-                cooldown: '1 km jog santai + peregangan.',
-                cue: 'Rasakan ritme napas khas tes 12 menit tanpa kehilangan bentuk lari.'
+                  ? (w >= Math.ceil(c.weeks * 0.6)
+                    ? `2 × 6 menit @ Pace 12 Menit (${formatPace(weekPace)}), jeda jog 3 menit.`
+                    : `3 × 4 menit @ Pace 12 Menit (${formatPace(weekPace)}), jeda jog 2.5 menit.`)
+                  : `3 × 8 menit @ Threshold (${formatPace(weekPace + 18)}), jeda jog 2 menit.`,
+                cooldown: '1.5 km jog santai.',
+                cue: 'Latih tubuh mengenali sensasi pace 12 menit tanpa panik saat napas mulai berat.'
               };
             }
             return {
               id: sid, day: slot.day, category: 'tempo',
               tagCls: 'bg-purple-100 text-purple-800',
-              type: 'Fartlek Cooper Rhythm (1-2-3-2-1 Mnt)',
+              type: w % 2 === 0 ? 'Fartlek Cooper Rhythm' : 'Progressive Aerobic-to-Threshold',
               dist: dKm,
-              pace: formatPace(weekPace + 8),
+              pace: formatPace(weekPace + 12),
               hr: hrZ[3].range,
-              rpe: '7.5/10',
-              durationMin: 38,
-              warmup: '1.2 km easy pace.',
-              mainSet: `Piramida 1-2-3-2-1 menit cepat @ ${formatPace(weekPace)} dengan jog float sama durasi.`,
-              cooldown: '1 km easy.',
-              cue: 'Latih transisi cepat antara kecepatan tes dan pemulihan aktif.'
+              rpe: '8/10',
+              durationMin: Math.round((dKm * (weekPace + 22)) / 60) + 8,
+              warmup: '1.5 km easy.',
+              mainSet: w % 2 === 0
+                ? `6 × (2 menit cepat @ ${formatPace(weekPace + 4)} + 90 dtk float santai).`
+                : `Mulai 2 km easy lalu tingkatkan bertahap hingga 2 km terakhir di ${formatPace(weekPace + 15)}.`,
+              cooldown: '1 km jog santai.',
+              cue: 'Fokus transisi mulus antar pergantian kecepatan.'
             };
           }
+
           if (slot.role.startsWith('easy_')) {
+            const idx = Number(slot.role.split('_')[1]);
             const dKm = Math.max(3, Number((baseKm * 0.9).toFixed(1)));
+            const variants = ['Easy Recovery + Strides', 'Recovery Shakeout Run', 'Easy Base Zona 2', 'Easy Cadence Run'];
             return {
               id: sid, day: slot.day, category: 'easy',
               tagCls: 'bg-emerald-100 text-emerald-800',
-              type: 'Easy Recovery + Strides',
+              type: variants[idx % variants.length],
               dist: dKm,
               pace: formatPace(weekPace + 70 + lvl.easyAdj),
               hr: hrZ[1].range,
               rpe: '4/10',
               durationMin: Math.round((dKm * (weekPace + 70)) / 60),
               warmup: '5 menit jog ringan.',
-              mainSet: `${dKm} km santai Z2 + 4 × 80m strides akselerasi ringan.`,
+              mainSet: idx === 0 ? `${dKm} km santai Z2 + 4 × 80m strides akselerasi ringan.` : `${dKm} km penuh di Zona 2 santai.`,
               cooldown: '5 menit jalan santai.',
               cue: 'Biarkan otot pulih penuh untuk sesi lintasan berikutnya.'
             };
           }
+
           return {
             id: sid, day: slot.day, category: 'strength',
             tagCls: 'bg-slate-200 text-slate-800',
@@ -3813,6 +4096,7 @@ service cloud.firestore {
       const summaryItems = [
         { k: 'Akun Email Aktif', v: currentUser ? currentUser.email : 'Belum masuk' },
         { k: 'Target Program Lomba', v: `${state.plan.dist} km @ ${formatHMS(state.plan.targetSec)} (${formatPace(state.plan.targetSec / state.plan.dist)})` },
+        { k: 'Spesialisasi Program Lomba', v: getPlanFocusLabel(state.plan.focus) },
         { k: 'Target Mileage Puncak', v: `${state.plan.weeklyTarget} ${state.plan.weeklyUnit}/minggu (${state.plan.weeks} minggu)` },
         { k: 'Target Program 12 Menit', v: `${state.cooper.currentMeters}m → ${state.cooper.targetMeters}m (${lvlMap[state.cooper.level] || 'Menengah'})` },
         { k: 'Pace vVO2max Saat Ini', v: `${formatPace(vo2ToVvo2PaceSec(curVo2))} (VO2 Max ${curVo2.toFixed(1)})` },
@@ -3868,7 +4152,7 @@ service cloud.firestore {
         });
         el.addEventListener('change', () => syncPlanInputs(false));
       });
-      ['planDist', 'planWeeks', 'planWeeklyUnit', 'planLevel', 'planCoreDays', 'planEasyDays', 'planIncludeStrength'].forEach(id => {
+      ['planDist', 'planWeeks', 'planWeeklyUnit', 'planLevel', 'planFocus', 'planCoreDays', 'planEasyDays', 'planIncludeStrength'].forEach(id => {
         document.getElementById(id).addEventListener('change', () => syncPlanInputs(false));
       });
       document.getElementById('planWeekFilter').addEventListener('change', (e) => { state.plan.weekFilter = e.target.value; renderTrainingPlan(); });
@@ -3882,7 +4166,10 @@ service cloud.firestore {
         renderTrainingPlan();
       });
       document.getElementById('btnCopyPlan').addEventListener('click', () => {
-        const lines = [`=== PROGRAM LATIHAN PACECRAFT (${state.plan.dist} KM) ===`];
+        const lines = [
+          `=== PROGRAM LATIHAN PACECRAFT (${state.plan.dist} KM) ===`,
+          `Spesialisasi: ${getPlanFocusLabel(state.plan.focus)}`
+        ];
         state.plan.generatedWeeks.forEach(w => {
           lines.push(`\nMinggu ${w.week} — ${w.phase} (${w.totalKm} km)`);
           w.sessions.forEach(s => lines.push(`- ${s.day}: ${s.type} | ${s.dist > 0 ? s.dist + ' km' : 'Penguatan'} | ${s.pace}`));
@@ -4120,29 +4407,36 @@ service cloud.firestore {
         const curVo2 = computeCurrentVo2();
         const hrZ = calculateHrZones();
         const lines = [
-          `=== PROFIL ATLET PACECRAFT: ${state.profile.name || 'Pelari'} ===`,
-          `VO2 Max: ${curVo2.toFixed(1)} -> Target ${state.vo2.target.toFixed(1)} ml/kg/mnt (${state.vo2.durationWeeks} mgg, ${getVo2MethodLabel(state.vo2.method)})`,
-          `Program Lomba: ${state.plan.dist} km @ ${formatHMS(state.plan.targetSec)} (${state.plan.weeks} mgg)`,
-          `Program 12 Menit: ${state.cooper.currentMeters}m -> ${state.cooper.targetMeters}m (${state.cooper.weeks} mgg)`,
-          `Zona HR (${state.hr.method}): Z2 ${hrZ[1].range} | Z4 ${hrZ[3].range} | Z5 ${hrZ[4].range}`
+          `=== PROFIL PELARI PACECRAFT PRO ===`,
+          `Nama: ${state.profile.name || 'Pelari PaceCraft'}`,
+          `Email: ${currentUser ? currentUser.email : '-'}`,
+          `VO2 Max: ${curVo2.toFixed(1)} -> Target ${state.vo2.target.toFixed(1)} (${state.vo2.durationWeeks} minggu)`,
+          `Program Lomba: ${state.plan.dist} km @ ${formatHMS(state.plan.targetSec)} (${formatPace(state.plan.targetSec / state.plan.dist)})`,
+          `Spesialisasi Lomba: ${getPlanFocusLabel(state.plan.focus)}`,
+          `Program 12 Menit: ${state.cooper.currentMeters}m -> ${state.cooper.targetMeters}m`,
+          `Zona HR: Z2 ${hrZ[1].range} | Z4 ${hrZ[3].range} | Z5 ${hrZ[4].range}`
         ];
         copyTextSafe(lines.join('\n'));
       });
       document.getElementById('btnResetAllData').addEventListener('click', () => {
-        showConfirmModal('Reset Semua Progres?', 'Seluruh checklist latihan di Program Lomba & Program 12 Menit akan dikosongkan dari Cloud.', () => {
-          state.plan.completed = {};
-          state.cooper.completed = {};
-          scheduleCloudSave();
-          renderTrainingPlan();
-          renderCooperPlan();
-          renderProfile();
-          showToast('Seluruh progres berhasil direset.');
-        });
+        showConfirmModal(
+          'Reset Semua Progres Checklist?',
+          'Seluruh tanda centang sesi latihan di Program Lomba dan Program 12 Menit akan dikosongkan dan disinkronkan ke Cloud.',
+          () => {
+            state.plan.completed = {};
+            state.cooper.completed = {};
+            scheduleCloudSave();
+            renderTrainingPlan();
+            renderCooperPlan();
+            renderProfile();
+            showToast('Progres checklist latihan berhasil direset.');
+          }
+        );
       });
 
-      // Render Awal
+      // Render Awal Seluruh Modul
       applyAllInputsFromState();
-      setVo2Method(state.vo2.method);
+      setVo2Method(state.vo2.method, false);
       renderHrZones();
       renderTrainingPlan();
       renderCooperPlan();
@@ -4153,10 +4447,10 @@ service cloud.firestore {
       renderProfile();
     }
 
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', initApp);
-    } else {
+    if (document.readyState === 'complete') {
       initApp();
+    } else {
+      window.addEventListener('load', initApp);
     }
   </script>
 </body>
