@@ -1432,7 +1432,7 @@ service cloud.firestore {
         const ref = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'profile', 'main');
         await setDoc(ref, { stateJson: JSON.stringify(state), updatedAt: now }, { merge: true });
         updateCloudSyncUI('synced', '', now);
-        if (showFeedback) showToast('✅ Data berhasil tersinkron dengan Cloud Firebase!');
+        if (showFeedback) showToast('✅Data Berhasil Disimpan!');
         return true;
       } catch (e) {
         console.warn('Cloud save error:', e.message);
